@@ -13,19 +13,22 @@ public:
 private:
 	SOCKET m_listenSocket;
 
+	static bool m_shutdown;
+
 	static HANDLE m_completionPort;
 
 	vector<unique_ptr<thread>> m_threads;
 	
-	static vector<CClientSocket> m_clientSockets;
+	static vector<shared_ptr<CClientSocket>> m_clientSockets;
 
 	void Uninit();
 	void StopThreads();
 	void StartThreads();
+	void CloseIOCompletionPort();
 
 	static void ProcessThreadFunc();
 	
-	static void CloseClientSocket(CClientSocket& clientSocket);
+	static void CloseClientSocket(shared_ptr<CClientSocket>& pClientSocket);
 
 	bool Init();
 	bool StartServer();

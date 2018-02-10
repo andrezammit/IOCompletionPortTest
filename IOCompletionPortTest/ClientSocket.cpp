@@ -17,11 +17,6 @@ CClientSocket::~CClientSocket()
 	closesocket(m_socket);
 }
 
-bool CClientSocket::operator==(const CClientSocket& rhs)
-{
-	return this == &rhs;
-}
-
 void CClientSocket::SetPacketLength(DWORD packetLen)
 {
 	m_packetLen = packetLen;

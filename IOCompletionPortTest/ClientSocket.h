@@ -22,8 +22,6 @@ public:
 	bool IsWriteMode();
 	bool IsPacketTransferred();
 
-	bool operator==(const CClientSocket& rhs);
-
 	DWORD m_transferMode;
 
 	DWORD m_bytesDone;

@@ -1,8 +1,9 @@
 #include "stdafx.h"
 #include "MainApp.h"
 
+bool CMainApp::m_shutdown = false;
 HANDLE CMainApp::m_completionPort = NULL;
-vector<CClientSocket> CMainApp::m_clientSockets;
+vector<shared_ptr<CClientSocket>> CMainApp::m_clientSockets;
 
 CMainApp::CMainApp()
 {
@@ -37,16 +38,15 @@ void CMainApp::Run()
 
 		SOCKET socket = accept(m_listenSocket, (sockaddr*)&clientAddress, &clientAddrLength);
 
-		m_clientSockets.push_back(CClientSocket());
+		shared_ptr<CClientSocket> pClientSocket(new CClientSocket);
+		m_clientSockets.emplace_back(pClientSocket);
 
-		CClientSocket& clientSocket = m_clientSockets.back();
-		clientSocket.m_socket = socket;
+		pClientSocket->m_socket = socket;
+		pClientSocket->SetPacketLength(5);
 
-		clientSocket.SetPacketLength(5);
+		UpdateIOCompletionPort(*pClientSocket);
 
-		UpdateIOCompletionPort(clientSocket);
-
-		clientSocket.Receive();
+		pClientSocket->Receive();
 	}
 }
 
@@ -60,7 +60,12 @@ bool CMainApp::Init()
 
 void CMainApp::Uninit()
 {
+	m_shutdown = true;
+
 	closesocket(m_listenSocket);
+
+	CloseIOCompletionPort();
+	StopThreads();
 
 	WSACleanup();
 }
@@ -100,11 +105,17 @@ bool CMainApp::CreateIOCompletionPort()
 	return true;
 }
 
+void CMainApp::CloseIOCompletionPort()
+{
+	CloseHandle(m_completionPort);
+	m_completionPort = NULL;
+}
+
 bool CMainApp::UpdateIOCompletionPort(CClientSocket& clientSocket)
 {
 	HANDLE completionPort = CreateIoCompletionPort((HANDLE) clientSocket.m_socket, m_completionPort, (ULONG_PTR)&clientSocket, 2);
 
-	if (m_completionPort != m_completionPort)
+	if (m_completionPort != completionPort)
 	{
 		return false;
 	}
@@ -138,47 +149,50 @@ void CMainApp::ProcessThreadFunc()
 		DWORD bytesTransferred = 0;
 
 		OVERLAPPED* pOverlapped = NULL;
-		CClientSocket* pClientSocket = NULL;
+		shared_ptr<CClientSocket> pClientSocket = NULL;
 
 		GetQueuedCompletionStatus(m_completionPort, &bytesTransferred, (PULONG_PTR)&pClientSocket, &pOverlapped, INFINITE);
+
+		if (m_shutdown)
+		{
+			return;
+		}
 
 		if (pClientSocket == NULL)
 		{
 			continue;
 		}
 
-		CClientSocket& clientSocket = *pClientSocket;
-
 		if (bytesTransferred == 0)
 		{
-			CloseClientSocket(clientSocket);
+			CloseClientSocket(pClientSocket);
 			continue;
 		}
 
-		clientSocket.AddTransferredBytes(bytesTransferred);
+		pClientSocket->AddTransferredBytes(bytesTransferred);
 
-		if (clientSocket.IsPacketTransferred())
+		if (pClientSocket->IsPacketTransferred())
 		{
-			clientSocket.ResetTransferredBytes();
+			pClientSocket->ResetTransferredBytes();
 
-			if (clientSocket.IsReadMode())
+			if (pClientSocket->IsReadMode())
 			{
-				clientSocket.SetWriteMode();
+				pClientSocket->SetWriteMode();
 			}
 			else
 			{
-				clientSocket.SetReadMode();
+				pClientSocket->SetReadMode();
 			}
 		}
 
-		clientSocket.Receive();
-		clientSocket.Send();
+		pClientSocket->Receive();
+		pClientSocket->Send();
 	}
 }
 
-void CMainApp::CloseClientSocket(CClientSocket& clientSocket)
+void CMainApp::CloseClientSocket(shared_ptr<CClientSocket>& pClientSocket)
 {
-	auto it = std::find(m_clientSockets.begin(), m_clientSockets.end(), clientSocket);
+	auto it = std::find(m_clientSockets.begin(), m_clientSockets.end(), pClientSocket);
 
 	if (it != m_clientSockets.end())
 	{
