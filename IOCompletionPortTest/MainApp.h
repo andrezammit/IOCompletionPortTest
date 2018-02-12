@@ -2,6 +2,9 @@
 
 #include "ClientSocket.h"
 
+#define ClientSocketShPtr	shared_ptr<CClientSocket>
+#define ClientSocketMap		concurrent_unordered_map <CClientSocket*, ClientSocketShPtr>
+
 class CMainApp
 {
 public:
@@ -13,22 +16,22 @@ public:
 private:
 	SOCKET m_listenSocket;
 
-	static bool m_shutdown;
+	bool m_shutdown;
 
-	static HANDLE m_completionPort;
+	HANDLE m_completionPort;
 
+	ClientSocketMap m_clientSockets;
 	vector<unique_ptr<thread>> m_threads;
-	
-	static concurrent_unordered_map <CClientSocket*, shared_ptr<CClientSocket>> m_clientSockets;
 
 	void Uninit();
 	void StopThreads();
 	void StartThreads();
+	void ProcessingThreadFunc();
 	void CloseIOCompletionPort();
 
-	static void ProcessThreadFunc();
-	
-	static void CloseClientSocket(shared_ptr<CClientSocket>& pClientSocket);
+	void CloseClientSocket(ClientSocketShPtr& pClientSocket);
+
+	static void ProcessingThread(CMainApp* pMainApp);
 
 	bool Init();
 	bool StartServer();

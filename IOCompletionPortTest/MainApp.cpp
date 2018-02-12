@@ -1,9 +1,10 @@
 #include "stdafx.h"
 #include "MainApp.h"
 
-bool CMainApp::m_shutdown = false;
-HANDLE CMainApp::m_completionPort = NULL;
-concurrent_unordered_map <CClientSocket*, shared_ptr<CClientSocket>> CMainApp::m_clientSockets;
+//bool CMainApp::m_shutdown = false;
+//HANDLE CMainApp::m_completionPort = NULL;
+
+//ClientSocketMap CMainApp::m_clientSockets;
 
 CMainApp::CMainApp()
 {
@@ -38,7 +39,7 @@ void CMainApp::Run()
 
 		SOCKET socket = accept(m_listenSocket, (sockaddr*)&clientAddress, &clientAddrLength);
 
-		shared_ptr<CClientSocket> pClientSocket(new CClientSocket);
+		ClientSocketShPtr pClientSocket(new CClientSocket);
 		m_clientSockets[pClientSocket.get()] = pClientSocket;
 
 		pClientSocket->m_socket = socket;
@@ -129,7 +130,7 @@ void CMainApp::StartThreads()
 
 	for (int cnt = 0; cnt < numOfThreads; cnt++)
 	{
-		unique_ptr<thread> pThread(new thread(ProcessThreadFunc));
+		unique_ptr<thread> pThread(new thread(ProcessingThread, this));
 		m_threads.emplace_back(move(pThread));
 	}
 }
@@ -142,7 +143,12 @@ void CMainApp::StopThreads()
 	}
 }
 
-void CMainApp::ProcessThreadFunc()
+void CMainApp::ProcessingThread(CMainApp* pMainApp)
+{
+	pMainApp->ProcessingThreadFunc();
+}
+
+void CMainApp::ProcessingThreadFunc()
 {
 	while (true)
 	{
@@ -163,7 +169,7 @@ void CMainApp::ProcessThreadFunc()
 			continue;
 		}
 
-		shared_ptr<CClientSocket> pClientSocket = m_clientSockets[pRawPointer];
+		ClientSocketShPtr pClientSocket = m_clientSockets[pRawPointer];
 
 		if (pClientSocket == nullptr)
 		{
@@ -197,7 +203,7 @@ void CMainApp::ProcessThreadFunc()
 	}
 }
 
-void CMainApp::CloseClientSocket(shared_ptr<CClientSocket>& pClientSocket)
+void CMainApp::CloseClientSocket(ClientSocketShPtr& pClientSocket)
 {
 	m_clientSockets[pClientSocket.get()] = nullptr;
 }
