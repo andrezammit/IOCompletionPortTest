@@ -1,11 +1,6 @@
 #include "stdafx.h"
 #include "MainApp.h"
 
-//bool CMainApp::m_shutdown = false;
-//HANDLE CMainApp::m_completionPort = NULL;
-
-//ClientSocketMap CMainApp::m_clientSockets;
-
 CMainApp::CMainApp()
 {
 	m_listenSocket = INVALID_SOCKET;
