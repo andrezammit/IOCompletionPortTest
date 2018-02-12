@@ -3,7 +3,7 @@
 
 bool CMainApp::m_shutdown = false;
 HANDLE CMainApp::m_completionPort = NULL;
-vector<shared_ptr<CClientSocket>> CMainApp::m_clientSockets;
+concurrent_unordered_map <CClientSocket*, shared_ptr<CClientSocket>> CMainApp::m_clientSockets;
 
 CMainApp::CMainApp()
 {
@@ -39,7 +39,7 @@ void CMainApp::Run()
 		SOCKET socket = accept(m_listenSocket, (sockaddr*)&clientAddress, &clientAddrLength);
 
 		shared_ptr<CClientSocket> pClientSocket(new CClientSocket);
-		m_clientSockets.emplace_back(pClientSocket);
+		m_clientSockets[pClientSocket.get()] = pClientSocket;
 
 		pClientSocket->m_socket = socket;
 		pClientSocket->SetPacketLength(5);
@@ -148,17 +148,24 @@ void CMainApp::ProcessThreadFunc()
 	{
 		DWORD bytesTransferred = 0;
 
-		OVERLAPPED* pOverlapped = NULL;
-		shared_ptr<CClientSocket> pClientSocket = NULL;
+		OVERLAPPED* pOverlapped = nullptr;
+		CClientSocket* pRawPointer = nullptr;
 
-		GetQueuedCompletionStatus(m_completionPort, &bytesTransferred, (PULONG_PTR)&pClientSocket, &pOverlapped, INFINITE);
+		GetQueuedCompletionStatus(m_completionPort, &bytesTransferred, (PULONG_PTR)&pRawPointer, &pOverlapped, INFINITE);
 
 		if (m_shutdown)
 		{
 			return;
 		}
 
-		if (pClientSocket == NULL)
+		if (pRawPointer == nullptr)
+		{
+			continue;
+		}
+
+		shared_ptr<CClientSocket> pClientSocket = m_clientSockets[pRawPointer];
+
+		if (pClientSocket == nullptr)
 		{
 			continue;
 		}
@@ -192,10 +199,5 @@ void CMainApp::ProcessThreadFunc()
 
 void CMainApp::CloseClientSocket(shared_ptr<CClientSocket>& pClientSocket)
 {
-	auto it = std::find(m_clientSockets.begin(), m_clientSockets.end(), pClientSocket);
-
-	if (it != m_clientSockets.end())
-	{
-		m_clientSockets.erase(it);
-	}
+	m_clientSockets[pClientSocket.get()] = nullptr;
 }

@@ -19,7 +19,7 @@ private:
 
 	vector<unique_ptr<thread>> m_threads;
 	
-	static vector<shared_ptr<CClientSocket>> m_clientSockets;
+	static concurrent_unordered_map <CClientSocket*, shared_ptr<CClientSocket>> m_clientSockets;
 
 	void Uninit();
 	void StopThreads();
