@@ -1,6 +1,8 @@
 #include "stdafx.h"
 #include "ClientSocket.h"
 
+#define IPV6_ADDR_LEN	46
+
 CClientSocket::CClientSocket()
 {
 	m_transferMode = modeRead;
@@ -12,9 +14,74 @@ CClientSocket::CClientSocket()
 	ZeroMemory(&m_overlapped, sizeof(WSAOVERLAPPED));
 }
 
+CClientSocket::CClientSocket(SOCKET socket, sockaddr& clientAddress)
+{
+	m_transferMode = modeRead;
+
+	m_bytesDone = 0;
+	m_packetLen = 0;
+
+	m_socket = socket;
+	ZeroMemory(&m_overlapped, sizeof(WSAOVERLAPPED));
+
+	SetClientAddrInfo(clientAddress);
+}
+
 CClientSocket::~CClientSocket()
 {
 	closesocket(m_socket);
+}
+
+void CClientSocket::SetClientAddrInfo(sockaddr& clientAddress)
+{
+	void* pAddr = nullptr;
+
+	if (clientAddress.sa_family == AF_INET)
+	{
+		sockaddr_in* pSockAddrIn = (sockaddr_in*) &clientAddress;
+		pAddr = &pSockAddrIn->sin_addr;
+
+		m_sockAddr.resize(sizeof(sockaddr_in));
+		memcpy_s(&m_sockAddr[0], m_sockAddr.size(), pSockAddrIn, sizeof(sockaddr_in));
+	}
+	else
+	{
+		sockaddr_in6* pSockAddrIn6 = (sockaddr_in6*)&clientAddress;
+		pAddr = &pSockAddrIn6->sin6_addr;
+
+		m_sockAddr.resize(sizeof(sockaddr_in6));
+		memcpy_s(&m_sockAddr[0], m_sockAddr.size(), pSockAddrIn6, sizeof(sockaddr_in6));
+	}
+
+	InetNtop(clientAddress.sa_family, pAddr, m_ipAddr.GetBuffer(IPV6_ADDR_LEN), IPV6_ADDR_LEN);
+	m_ipAddr.ReleaseBuffer();
+}
+
+USHORT CClientSocket::GetPort()
+{
+	if (m_sockAddr.size() == 0)
+	{
+		return 0;
+	}
+
+	sockaddr* pSockAddr = (sockaddr*) &m_sockAddr[0];
+
+	if (pSockAddr->sa_family == AF_INET)
+	{
+		sockaddr_in* pSockAddrIn = (sockaddr_in*)&pSockAddr;
+		return pSockAddrIn->sin_port;
+	}
+	
+	sockaddr_in6* pSockAddrIn6 = (sockaddr_in6*)&pSockAddr;
+	return pSockAddrIn6->sin6_port;
+}
+
+CString CClientSocket::GetClientAddrString()
+{
+	CString clientAddr;
+	clientAddr.Format(_T("%s:%d"), m_ipAddr, GetPort());
+
+	return clientAddr;
 }
 
 void CClientSocket::SetPacketLength(DWORD packetLen)

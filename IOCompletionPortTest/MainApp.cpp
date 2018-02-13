@@ -29,12 +29,17 @@ void CMainApp::Run()
 
 	while (true)
 	{
-		sockaddr_in clientAddress = { 0 };
+		sockaddr_in6 clientAddress = { 0 };
 		int clientAddrLength = sizeof(clientAddress);
 
-		SOCKET socket = accept(m_listenSocket, (sockaddr*)&clientAddress, &clientAddrLength);
+		SOCKET socket = WSAAccept(m_listenSocket, (sockaddr*)&clientAddress, &clientAddrLength, NULL, NULL);
 
-		ClientSocketShPtr pClientSocket(new CClientSocket);
+		ClientSocketShPtr pClientSocket(new CClientSocket(socket, (sockaddr&) clientAddress));
+
+		_tprintf(_T("New socket %d from %s\n"), 
+			pClientSocket->m_socket, 
+			pClientSocket->GetClientAddrString().GetString());
+
 		pClientSocket->m_socket = socket;
 		pClientSocket->SetPacketLength(5);
 
@@ -56,6 +61,8 @@ bool CMainApp::Init()
 
 void CMainApp::Uninit()
 {
+	_tprintf(_T("Shutting down.\n"));
+
 	m_shutdown = true;
 
 	closesocket(m_listenSocket);
@@ -68,6 +75,8 @@ void CMainApp::Uninit()
 
 bool CMainApp::StartServer()
 {
+	_tprintf(_T("Starting server on 127.0.0.1:880.\n"));
+
 	m_listenSocket = WSASocket(AF_INET, SOCK_STREAM, IPPROTO_TCP,
 		NULL, 0, WSA_FLAG_OVERLAPPED);
 
@@ -91,6 +100,8 @@ bool CMainApp::StartServer()
 
 bool CMainApp::CreateIOCompletionPort()
 {
+	_tprintf(_T("Creating IO completion port.\n"));
+
 	m_completionPort = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 2);
 
 	if (m_completionPort == NULL)
@@ -103,6 +114,8 @@ bool CMainApp::CreateIOCompletionPort()
 
 void CMainApp::CloseIOCompletionPort()
 {
+	_tprintf(_T("Closing IO completion port.\n"));
+
 	CloseHandle(m_completionPort);
 	m_completionPort = NULL;
 }
@@ -121,6 +134,8 @@ bool CMainApp::UpdateIOCompletionPort(CClientSocket& clientSocket)
 
 void CMainApp::StartThreads()
 {
+	_tprintf(_T("Starting threads.\n"));
+
 	int numOfThreads = 2;
 
 	for (int cnt = 0; cnt < numOfThreads; cnt++)
@@ -132,6 +147,8 @@ void CMainApp::StartThreads()
 
 void CMainApp::StopThreads()
 {
+	_tprintf(_T("Stopping threads.\n"));
+
 	for (size_t cnt = 0; cnt < m_threads.size(); cnt++)
 	{
 		m_threads[cnt]->join();
@@ -198,5 +215,9 @@ void CMainApp::ProcessingThreadFunc()
 
 void CMainApp::CloseClientSocket(ClientSocketShPtr& pClientSocket)
 {
+	_tprintf(_T("Closing socket %d from %s.\n"), 
+		pClientSocket->m_socket, 
+		pClientSocket->GetClientAddrString().GetString());
+
 	m_clientSockets[pClientSocket->m_socket] = nullptr;
 }
