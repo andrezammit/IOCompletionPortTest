@@ -35,10 +35,10 @@ void CMainApp::Run()
 		SOCKET socket = accept(m_listenSocket, (sockaddr*)&clientAddress, &clientAddrLength);
 
 		ClientSocketShPtr pClientSocket(new CClientSocket);
-		m_clientSockets[pClientSocket.get()] = pClientSocket;
-
 		pClientSocket->m_socket = socket;
 		pClientSocket->SetPacketLength(5);
+
+		m_clientSockets[pClientSocket->m_socket] = pClientSocket;
 
 		UpdateIOCompletionPort(*pClientSocket);
 
@@ -109,7 +109,7 @@ void CMainApp::CloseIOCompletionPort()
 
 bool CMainApp::UpdateIOCompletionPort(CClientSocket& clientSocket)
 {
-	HANDLE completionPort = CreateIoCompletionPort((HANDLE) clientSocket.m_socket, m_completionPort, (ULONG_PTR)&clientSocket, 2);
+	HANDLE completionPort = CreateIoCompletionPort((HANDLE) clientSocket.m_socket, m_completionPort, (ULONG_PTR)clientSocket.m_socket, 2);
 
 	if (m_completionPort != completionPort)
 	{
@@ -149,22 +149,20 @@ void CMainApp::ProcessingThreadFunc()
 	{
 		DWORD bytesTransferred = 0;
 
+		SOCKET socket = INVALID_SOCKET;
 		OVERLAPPED* pOverlapped = nullptr;
-		CClientSocket* pRawPointer = nullptr;
 
-		GetQueuedCompletionStatus(m_completionPort, &bytesTransferred, (PULONG_PTR)&pRawPointer, &pOverlapped, INFINITE);
+		if (!GetQueuedCompletionStatus(m_completionPort, &bytesTransferred, (PULONG_PTR)&socket, &pOverlapped, INFINITE))
+		{
+			return;
+		}
 
 		if (m_shutdown)
 		{
 			return;
 		}
 
-		if (pRawPointer == nullptr)
-		{
-			continue;
-		}
-
-		ClientSocketShPtr pClientSocket = m_clientSockets[pRawPointer];
+		ClientSocketShPtr pClientSocket = m_clientSockets[socket];
 
 		if (pClientSocket == nullptr)
 		{
@@ -200,5 +198,5 @@ void CMainApp::ProcessingThreadFunc()
 
 void CMainApp::CloseClientSocket(ClientSocketShPtr& pClientSocket)
 {
-	m_clientSockets[pClientSocket.get()] = nullptr;
+	m_clientSockets[pClientSocket->m_socket] = nullptr;
 }

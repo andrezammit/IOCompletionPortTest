@@ -3,7 +3,7 @@
 #include "ClientSocket.h"
 
 #define ClientSocketShPtr	shared_ptr<CClientSocket>
-#define ClientSocketMap		concurrent_unordered_map <CClientSocket*, ClientSocketShPtr>
+#define ClientSocketMap		concurrent_unordered_map <SOCKET, ClientSocketShPtr>
 
 class CMainApp
 {
