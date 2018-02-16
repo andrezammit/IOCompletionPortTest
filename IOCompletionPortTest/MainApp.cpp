@@ -5,6 +5,9 @@ CMainApp::CMainApp()
 {
 	m_listenSocket = INVALID_SOCKET;
 
+	m_jobCompletionPort = NULL;
+	m_socketCompletionPort = NULL;
+
 	Init();
 }
 
@@ -41,7 +44,7 @@ void CMainApp::Run()
 			pClientSocket->GetClientAddrString().GetString());
 
 		pClientSocket->m_socket = socket;
-		pClientSocket->SetPacketLength(5);
+		pClientSocket->SetPacketLength(1);
 
 		m_clientSockets[pClientSocket->m_socket] = pClientSocket;
 
@@ -102,9 +105,16 @@ bool CMainApp::CreateIOCompletionPort()
 {
 	_tprintf(_T("Creating IO completion port.\n"));
 
-	m_completionPort = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 2);
+	m_jobCompletionPort = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 2);
 
-	if (m_completionPort == NULL)
+	if (m_jobCompletionPort == NULL)
+	{
+		return false;
+	}
+
+	m_socketCompletionPort = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 2);
+
+	if (m_socketCompletionPort == NULL)
 	{
 		return false;
 	}
@@ -116,15 +126,18 @@ void CMainApp::CloseIOCompletionPort()
 {
 	_tprintf(_T("Closing IO completion port.\n"));
 
-	CloseHandle(m_completionPort);
-	m_completionPort = NULL;
+	CloseHandle(m_jobCompletionPort);
+	CloseHandle(m_socketCompletionPort);
+
+	m_jobCompletionPort = NULL;
+	m_socketCompletionPort = NULL;
 }
 
 bool CMainApp::UpdateIOCompletionPort(CClientSocket& clientSocket)
 {
-	HANDLE completionPort = CreateIoCompletionPort((HANDLE) clientSocket.m_socket, m_completionPort, (ULONG_PTR)clientSocket.m_socket, 2);
+	HANDLE completionPort = CreateIoCompletionPort((HANDLE) clientSocket.m_socket, m_socketCompletionPort, (ULONG_PTR)clientSocket.m_socket, 2);
 
-	if (m_completionPort != completionPort)
+	if (m_socketCompletionPort != completionPort)
 	{
 		return false;
 	}
@@ -140,7 +153,13 @@ void CMainApp::StartThreads()
 
 	for (int cnt = 0; cnt < numOfThreads; cnt++)
 	{
-		unique_ptr<thread> pThread(new thread(ProcessingThread, this));
+		unique_ptr<thread> pThread(new thread(SocketProcessingThread, this));
+		m_threads.emplace_back(move(pThread));
+	}
+
+	for (int cnt = 0; cnt < numOfThreads; cnt++)
+	{
+		unique_ptr<thread> pThread(new thread(JobProcessingThread, this));
 		m_threads.emplace_back(move(pThread));
 	}
 }
@@ -155,12 +174,12 @@ void CMainApp::StopThreads()
 	}
 }
 
-void CMainApp::ProcessingThread(CMainApp* pMainApp)
+void CMainApp::SocketProcessingThread(CMainApp* pMainApp)
 {
-	pMainApp->ProcessingThreadFunc();
+	pMainApp->SocketProcessingThreadFunc();
 }
 
-void CMainApp::ProcessingThreadFunc()
+void CMainApp::SocketProcessingThreadFunc()
 {
 	while (true)
 	{
@@ -169,7 +188,7 @@ void CMainApp::ProcessingThreadFunc()
 		SOCKET socket = INVALID_SOCKET;
 		OVERLAPPED* pOverlapped = nullptr;
 
-		if (!GetQueuedCompletionStatus(m_completionPort, &bytesTransferred, (PULONG_PTR)&socket, &pOverlapped, INFINITE))
+		if (!GetQueuedCompletionStatus(m_socketCompletionPort, &bytesTransferred, (PULONG_PTR)&socket, &pOverlapped, INFINITE))
 		{
 			return;
 		}
@@ -196,20 +215,26 @@ void CMainApp::ProcessingThreadFunc()
 
 		if (pClientSocket->IsPacketTransferred())
 		{
-			pClientSocket->ResetTransferredBytes();
-
 			if (pClientSocket->IsReadMode())
 			{
-				pClientSocket->SetWriteMode();
+				pClientSocket->ResetTransferredBytes();
+
+				QueuedJobShPtr pNewJob(new CJob(pClientSocket.get()));
+				m_queuedJobs[pNewJob.get()] = pNewJob;
+
+				PostQueuedCompletionStatus(m_jobCompletionPort, 0, (ULONG_PTR)pNewJob.get(), NULL);
 			}
 			else
 			{
 				pClientSocket->SetReadMode();
+				pClientSocket->Receive();
 			}
 		}
-
-		pClientSocket->Receive();
-		pClientSocket->Send();
+		else
+		{
+			pClientSocket->Receive();
+			pClientSocket->Send();
+		}
 	}
 }
 
@@ -220,4 +245,53 @@ void CMainApp::CloseClientSocket(ClientSocketShPtr& pClientSocket)
 		pClientSocket->GetClientAddrString().GetString());
 
 	m_clientSockets[pClientSocket->m_socket] = nullptr;
+}
+
+void CMainApp::JobProcessingThread(CMainApp* pMainApp)
+{
+	pMainApp->JobProcessingThreadFunc();
+}
+
+void CMainApp::JobProcessingThreadFunc()
+{
+	while (true)
+	{
+		DWORD bytesTransferred = 0;
+
+		CJob* pJob = nullptr;
+		OVERLAPPED* pOverlapped = nullptr;
+
+		if (!GetQueuedCompletionStatus(m_jobCompletionPort, &bytesTransferred, (PULONG_PTR)&pJob, &pOverlapped, INFINITE))
+		{
+			return;
+		}
+
+		if (m_shutdown)
+		{
+			return;
+		}
+
+		QueuedJobShPtr pQueuedJob = m_queuedJobs[pJob];
+
+		if (pQueuedJob == nullptr)
+		{
+			continue;
+		}
+
+		int pos = pQueuedJob->m_buffer[0];
+		int updatedNumber = m_testData[pos]++;
+
+		ClientSocketShPtr pClientSocket = m_clientSockets[pQueuedJob->m_socket];
+
+		if (pClientSocket == nullptr)
+		{
+			continue;
+		}
+
+		pClientSocket->SetPacketLength(sizeof(updatedNumber));
+		memcpy_s(&pClientSocket->m_buffer[0], pClientSocket->m_buffer.size(), &updatedNumber, sizeof(updatedNumber));
+
+		pClientSocket->SetWriteMode();
+		pClientSocket->Send();
+	}
 }
