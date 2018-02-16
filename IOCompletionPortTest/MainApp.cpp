@@ -5,7 +5,6 @@ CMainApp::CMainApp()
 {
 	m_listenSocket = INVALID_SOCKET;
 
-	m_jobCompletionPort = NULL;
 	m_socketCompletionPort = NULL;
 
 	Init();
@@ -44,13 +43,11 @@ void CMainApp::Run()
 			pClientSocket->GetClientAddrString().GetString());
 
 		pClientSocket->m_socket = socket;
-		pClientSocket->SetPacketLength(1);
 
 		m_clientSockets[pClientSocket->m_socket] = pClientSocket;
-
 		UpdateIOCompletionPort(*pClientSocket);
 
-		pClientSocket->Receive();
+		pClientSocket->Receive(1);
 	}
 }
 
@@ -105,13 +102,6 @@ bool CMainApp::CreateIOCompletionPort()
 {
 	_tprintf(_T("Creating IO completion port.\n"));
 
-	m_jobCompletionPort = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 2);
-
-	if (m_jobCompletionPort == NULL)
-	{
-		return false;
-	}
-
 	m_socketCompletionPort = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 2);
 
 	if (m_socketCompletionPort == NULL)
@@ -126,10 +116,7 @@ void CMainApp::CloseIOCompletionPort()
 {
 	_tprintf(_T("Closing IO completion port.\n"));
 
-	CloseHandle(m_jobCompletionPort);
 	CloseHandle(m_socketCompletionPort);
-
-	m_jobCompletionPort = NULL;
 	m_socketCompletionPort = NULL;
 }
 
@@ -154,12 +141,6 @@ void CMainApp::StartThreads()
 	for (int cnt = 0; cnt < numOfThreads; cnt++)
 	{
 		unique_ptr<thread> pThread(new thread(SocketProcessingThread, this));
-		m_threads.emplace_back(move(pThread));
-	}
-
-	for (int cnt = 0; cnt < numOfThreads; cnt++)
-	{
-		unique_ptr<thread> pThread(new thread(JobProcessingThread, this));
 		m_threads.emplace_back(move(pThread));
 	}
 }
@@ -215,27 +196,45 @@ void CMainApp::SocketProcessingThreadFunc()
 
 		if (pClientSocket->IsPacketTransferred())
 		{
+			pClientSocket->ResetTransferredBytes();
+
 			if (pClientSocket->IsReadMode())
 			{
-				pClientSocket->ResetTransferredBytes();
-
-				QueuedJobShPtr pNewJob(new CJob(pClientSocket.get()));
-				m_queuedJobs[pNewJob.get()] = pNewJob;
-
-				PostQueuedCompletionStatus(m_jobCompletionPort, 0, (ULONG_PTR)pNewJob.get(), NULL);
+				if (!ProcessPacket(pClientSocket))
+				{
+					CloseClientSocket(pClientSocket);
+					continue;
+				}
 			}
 			else
 			{
-				pClientSocket->SetReadMode();
-				pClientSocket->Receive();
+				pClientSocket->Receive(1);
 			}
 		}
 		else
 		{
-			pClientSocket->Receive();
-			pClientSocket->Send();
+			pClientSocket->ReceivePendingData();
+			pClientSocket->SendPendingData();
 		}
 	}
+}
+
+bool CMainApp::ProcessPacket(ClientSocketShPtr& pClientSocket)
+{
+	auto& buffer = pClientSocket->m_buffer;
+
+	int pos = buffer[0];
+	int updatedNumber = ++m_testData[pos];
+
+	pClientSocket->SetPacketLength(1024);
+
+	ZeroMemory(&buffer[0], buffer.size());
+	_itoa_s(updatedNumber, (char*) &buffer[0], buffer.size(), 10);
+
+	size_t newSize = strnlen((char*)&buffer[0], buffer.size());
+	pClientSocket->SetPacketLength(newSize);
+
+	return pClientSocket->Send();
 }
 
 void CMainApp::CloseClientSocket(ClientSocketShPtr& pClientSocket)
@@ -245,53 +244,4 @@ void CMainApp::CloseClientSocket(ClientSocketShPtr& pClientSocket)
 		pClientSocket->GetClientAddrString().GetString());
 
 	m_clientSockets[pClientSocket->m_socket] = nullptr;
-}
-
-void CMainApp::JobProcessingThread(CMainApp* pMainApp)
-{
-	pMainApp->JobProcessingThreadFunc();
-}
-
-void CMainApp::JobProcessingThreadFunc()
-{
-	while (true)
-	{
-		DWORD bytesTransferred = 0;
-
-		CJob* pJob = nullptr;
-		OVERLAPPED* pOverlapped = nullptr;
-
-		if (!GetQueuedCompletionStatus(m_jobCompletionPort, &bytesTransferred, (PULONG_PTR)&pJob, &pOverlapped, INFINITE))
-		{
-			return;
-		}
-
-		if (m_shutdown)
-		{
-			return;
-		}
-
-		QueuedJobShPtr pQueuedJob = m_queuedJobs[pJob];
-
-		if (pQueuedJob == nullptr)
-		{
-			continue;
-		}
-
-		int pos = pQueuedJob->m_buffer[0];
-		int updatedNumber = m_testData[pos]++;
-
-		ClientSocketShPtr pClientSocket = m_clientSockets[pQueuedJob->m_socket];
-
-		if (pClientSocket == nullptr)
-		{
-			continue;
-		}
-
-		pClientSocket->SetPacketLength(sizeof(updatedNumber));
-		memcpy_s(&pClientSocket->m_buffer[0], pClientSocket->m_buffer.size(), &updatedNumber, sizeof(updatedNumber));
-
-		pClientSocket->SetWriteMode();
-		pClientSocket->Send();
-	}
 }

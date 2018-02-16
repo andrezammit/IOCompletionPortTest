@@ -20,10 +20,14 @@ public:
 	void AddTransferredBytes(DWORD bytesTransferred);
 
 	bool Send();
-	bool Receive();
 	bool IsReadMode();
 	bool IsWriteMode();
+	bool SendPendingData();
+	bool ReceivePendingData();
 	bool IsPacketTransferred();
+	
+	bool Receive(DWORD packetLen);
+	bool Send(vector<BYTE>& data);
 
 	USHORT GetPort();
 

@@ -125,7 +125,15 @@ void CClientSocket::SetWriteMode()
 	m_transferMode = modeWrite;
 }
 
-bool CClientSocket::Receive()
+bool CClientSocket::Receive(DWORD packetLen)
+{
+	SetReadMode();
+	SetPacketLength(packetLen);
+
+	return ReceivePendingData();
+}
+
+bool CClientSocket::ReceivePendingData()
 {
 	if (!IsReadMode())
 	{
@@ -163,7 +171,7 @@ bool CClientSocket::Receive()
 	return true;
 }
 
-bool CClientSocket::Send()
+bool CClientSocket::SendPendingData()
 {
 	if (!IsWriteMode())
 	{
@@ -187,4 +195,19 @@ bool CClientSocket::Send()
 	WSASend(m_socket, &dataBuff, 1, NULL, flags, &m_overlapped, NULL);
 
 	return true;
+}
+
+bool CClientSocket::Send(vector<BYTE>& data)
+{
+	SetPacketLength(data.size());
+
+	m_buffer = data;
+
+	return Send();
+}
+
+bool CClientSocket::Send()
+{
+	SetWriteMode();
+	return SendPendingData();
 }
